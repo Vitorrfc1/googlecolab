@@ -1,0 +1,197 @@
+!pip install pillow cryptography
+     
+
+from PIL import Image
+import hashlib
+from cryptography.hazmat.primitives.asymmetric import rsa, padding
+from cryptography.hazmat.primitives import serialization, hashes
+
+# =========================
+# ESTEGANOGRAFIA
+# =========================
+
+def message_to_binary(message):
+    return ''.join([format(ord(char), '08b') for char in message])
+
+def binary_to_message(binary_data):
+    binary_chars = [binary_data[i:i + 8] for i in range(0, len(binary_data), 8)]
+    return ''.join([chr(int(binary_char, 2)) for binary_char in binary_chars])
+
+def encode_message(image_path, message, output_image_path):
+    image = Image.open(image_path).convert('RGB')
+    pixels = image.load()
+
+    binary_message = message_to_binary(message) + '1111111111111110'
+    data_index = 0
+
+    for row in range(image.size[1]):
+        for col in range(image.size[0]):
+            if data_index < len(binary_message):
+                r, g, b = pixels[col, row]
+
+                r = (r & 254) | int(binary_message[data_index])
+                data_index += 1
+
+                if data_index < len(binary_message):
+                    g = (g & 254) | int(binary_message[data_index])
+                    data_index += 1
+
+                if data_index < len(binary_message):
+                    b = (b & 254) | int(binary_message[data_index])
+                    data_index += 1
+
+                pixels[col, row] = (r, g, b)
+
+    image.save(output_image_path)
+    print("✅ Mensagem embutida com sucesso!")
+
+def decode_message(image_path):
+    image = Image.open(image_path).convert('RGB')
+    pixels = image.load()
+
+    binary_message = ''
+
+    for row in range(image.size[1]):
+        for col in range(image.size[0]):
+            r, g, b = pixels[col, row]
+            binary_message += str(r & 1)
+            binary_message += str(g & 1)
+            binary_message += str(b & 1)
+
+    hidden_message = binary_to_message(binary_message)
+    termination_index = hidden_message.find('þ')
+
+    if termination_index != -1:
+        hidden_message = hidden_message[:termination_index]
+
+    return hidden_message
+
+def generate_hash(image_path):
+    with open(image_path, 'rb') as f:
+        bytes_data = f.read()
+        return hashlib.sha256(bytes_data).hexdigest()
+
+def generate_keys():
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key()
+    return private_key, public_key
+
+def encrypt_message(public_key, message):
+    encrypted = public_key.encrypt(
+        message.encode(),
+        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                     algorithm=hashes.SHA256(),
+                     label=None)
+    )
+    return encrypted
+
+def decrypt_message(private_key, encrypted_message):
+    decrypted = private_key.decrypt(
+        encrypted_message,
+        padding.OAEP(mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                     algorithm=hashes.SHA256(),
+                     label=None)
+    )
+    return decrypted.decode()
+
+private_key, public_key = generate_keys()
+encrypted_global = None
+
+while True:
+    print("\n===== MENU =====")
+    print("(1) Embutir texto em imagem")
+    print("(2) Recuperar texto da imagem")
+    print("(3) Gerar hash das imagens")
+    print("(4) Criptografar mensagem (RSA)")
+    print("(5) Decriptar mensagem (RSA)")
+    print("(S) Sair")
+
+    option = input("Escolha uma opção: ")
+
+    if option == '1':
+        img_in = input("Imagem original: ")
+        img_out = input("Imagem de saída: ")
+        msg = input("Mensagem: ")
+        encode_message(img_in, msg, img_out)
+
+    elif option == '2':
+        img = input("Imagem com mensagem: ")
+        msg = decode_message(img)
+        print("📩 Mensagem recuperada:", msg)
+
+    elif option == '3':
+        img1 = input("Imagem original: ")
+        img2 = input("Imagem alterada: ")
+
+        hash1 = generate_hash(img1)
+        hash2 = generate_hash(img2)
+
+        print("Hash original:", hash1)
+        print("Hash alterada:", hash2)
+
+        if hash1 != hash2:
+            print("✅ As imagens são diferentes (houve alteração)")
+        else:
+            print("❌ As imagens são iguais")
+
+    elif option == '4':
+        msg = input("Mensagem para criptografar: ")
+        encrypted_global = encrypt_message(public_key, msg)
+        print("🔒 Mensagem criptografada (bytes):", encrypted_global)
+
+    elif option == '5':
+        if encrypted_global is None:
+            print("⚠️ Nenhuma mensagem criptografada ainda!")
+        else:
+            decrypted = decrypt_message(private_key, encrypted_global)
+            print("🔓 Mensagem decriptada:", decrypted)
+
+    elif option.lower() == 's':
+        print("Encerrando...")
+        break
+
+    else:
+        print("Opção inválida!")
+     
+===== MENU =====
+(1) Embutir texto em imagem
+(2) Recuperar texto da imagem
+(3) Gerar hash das imagens
+(4) Criptografar mensagem (RSA)
+(5) Decriptar mensagem (RSA)
+(S) Sair
+Escolha uma opção: 3
+Imagem original: lindas-dunas.png
+Imagem alterada: lindas-dunas-alt.jpg
+Hash original: ac5a4803ff28c20c77a4d491944f929f66a2d7df5b00582fb4610a5a1ddb41b7
+Hash alterada: 7f62cc23c844a7322e71802303c0c000bfa4a7a2e1de0110d50940c2a83d2879
+✅ As imagens são diferentes (houve alteração)
+
+===== MENU =====
+(1) Embutir texto em imagem
+(2) Recuperar texto da imagem
+(3) Gerar hash das imagens
+(4) Criptografar mensagem (RSA)
+(5) Decriptar mensagem (RSA)
+(S) Sair
+Escolha uma opção: 4
+Mensagem para criptografar: Olá, mundo!
+🔒 Mensagem criptografada (bytes): b'\xa1\x13\xb2\xcb\xe3"\n\xaa`y\xc0\x08\xf4\xc9\xd3k\x19\xa7\xc9`\xdcF\xb4\xe9A$\xa2\x92k\x0e\x06\xbc\x1aF\xef@\x93\xa7w\x0c\xdb&H\xda\t\x82\xdb/\xe14EA\xce\xac*\x8d\xc0\xb8\xbc.\xa1\xbd\\\x19\xb0a\'\x14\x7f\xe4(\xcf\xd3\x9f\xce\xc8L\xed\x02\x16a\x86W\x9c\x96I\xc1\x8e\xb7\x96\xbd\x88f\xc7T\xc84\x18\xa4\x1a[b\xcf1\xf5\x05\xc4\x1e\xa7\x80VN\x99\xb5qu\x8a\xc7\xe4\xc8\xfdK\x8f,h\xc2\x1a\xed:_\xfa\x06\t\\\xb9\x88\x7f:Kw\xb0\xd9\xaf/\xe3\x1ar8\xde;\xe3o\x95\x02\x0bQ\xc4\xb6\xe8,\x85\xb4=D\xf6\xbf\x90S\xd6$c\x1c\x94b\xca&\xe3=\xe5&j\xf9:L;\x06\x86%0\xd4\xdb\xb9\x9cAI\xa7\xbe\xeb\xf3\xa3\xb6n\xe2x\xf4S\xc3\xf4z2\xf2\xf7\x10\x08GO\xb2\xa3\xfeZMj\xf13\x99\xc1P\x83k~\xf8,\xb6\r\xa4\xe2\x95\xf5\x0e-\xed\xf3\x1b\x15\xd1l,\r\xe3DH\xaa_u\x8b\xd1'
+
+===== MENU =====
+(1) Embutir texto em imagem
+(2) Recuperar texto da imagem
+(3) Gerar hash das imagens
+(4) Criptografar mensagem (RSA)
+(5) Decriptar mensagem (RSA)
+(S) Sair
+Escolha uma opção: 5
+🔓 Mensagem decriptada: Olá, mundo!
+
+===== MENU =====
+(1) Embutir texto em imagem
+(2) Recuperar texto da imagem
+(3) Gerar hash das imagens
+(4) Criptografar mensagem (RSA)
+(5) Decriptar mensagem (RSA)
+(S) Sair
